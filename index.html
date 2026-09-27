@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#0A0611" />
+<title>证词 · 骑士与无赖</title>
+<meta name="description" content="中文骑士与无赖推理：每句证词都是一个方程——说话人是骑士，当且仅当他说的那句为真。每局唯一解，每局都能用铅笔规则推到底。" />
+<!-- Inline icon: without it the browser probes the Pages domain root for /favicon.ico and logs a 404. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0611'/%3E%3Cpath d='M6 6h14l6 10-6 10H6z' fill='%23F0B13C'/%3E%3C/svg%3E" />
+<link rel="stylesheet" href="css/game.css" />
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">
+      <h1>证词</h1>
+      <p class="sub">Syllogism · 骑士与无赖</p>
+    </div>
+    <div class="top-actions">
+      <button id="btn-sound" class="ghost" type="button" aria-pressed="true">音效 开</button>
+      <button id="btn-motion" class="ghost" type="button" aria-pressed="false">动效 全</button>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-menu" class="view">
+      <div class="menu-hero">
+        <h2>每个人要么是骑士，要么是无赖</h2>
+        <p>
+          骑士说的每一句都为真，无赖说的每一句都为假。所以每句证词都是一个方程：
+          <b>说话人是骑士，当且仅当他说的那句为真</b>。把每个人的身份填完，
+          再让所有方程同时成立——这一局就结束了。这里没有运气题：
+          出货的每一局都能只用铅笔规则推到底，提示也只说推得出的一步。
+        </p>
+      </div>
+
+      <div class="menu-cols">
+        <div class="col">
+          <h3 class="col-title">选一口供的规模</h3>
+          <div id="tier-list" class="tiers"></div>
+
+          <div id="daily-card" class="daily">
+            <div class="daily-txt">
+              <strong>每日证词</strong>
+              <span id="daily-meta">今天的种子</span>
+            </div>
+            <button id="btn-daily" class="primary" type="button">今日</button>
+          </div>
+
+          <div id="resume-card" class="resume" hidden>
+            <div class="resume-txt">
+              <strong id="resume-name">未审完的口供</strong>
+              <span id="resume-meta"></span>
+            </div>
+            <button id="btn-resume" class="primary" type="button">继续</button>
+          </div>
+        </div>
+
+        <div class="col">
+          <h3 class="col-title">纪录（同档先比求了几次提示，再比步数，最后比时间）</h3>
+          <ul id="record-list" class="records"></ul>
+
+          <h3 class="col-title">七条铅笔规则 —— 提示只会说这七个名字</h3>
+          <ol id="rule-list" class="rules"></ol>
+
+          <h3 class="col-title">手上这几下</h3>
+          <div class="keys">
+            <span><kbd>Tab</kbd> / <kbd>↑↓</kbd> 换人</span>
+            <span><kbd>←→</kbd> 换句</span>
+            <span><kbd>1</kbd> 骑士</span>
+            <span><kbd>2</kbd> 无赖</span>
+            <span><kbd>3</kbd> 未定</span>
+            <span><kbd>Enter</kbd> 轮换三态</span>
+            <span><kbd>.</kbd> 划掉这句</span>
+            <span><kbd>H</kbd> 提示</span>
+            <span><kbd>U</kbd> 撤销</span>
+            <span><kbd>R</kbd> 重开</span>
+            <span><kbd>P</kbd> 暂停</span>
+            <span><kbd>Esc</kbd> 回选档</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-game" class="view" hidden>
+      <div class="stage">
+        <div class="stage-head">
+          <span id="stat-name" class="puzzle-name">—</span>
+          <span id="stat-tier" class="chip">—</span>
+          <span id="stat-count" class="chip">—</span>
+          <span id="stat-time" class="chip mono">00:00</span>
+        </div>
+        <div id="board-wrap">
+          <canvas id="board" tabindex="0" role="img"
+            aria-label="口供卡堆：每张卡是一个人，卡上是他说过的那一两句证词，卡头有骑士、无赖、未定三个牌子"></canvas>
+          <div id="win-veil" hidden>
+            <div class="win-card">
+              <h3>所有人对上了</h3>
+              <p id="win-meta"></p>
+              <p id="win-check" class="mono"></p>
+              <p id="win-record" class="win-record"></p>
+              <div class="win-actions">
+                <button id="btn-again" class="primary" type="button">再来一局</button>
+                <button id="btn-menu-2" class="ghost" type="button">回选档</button>
+              </div>
+            </div>
+          </div>
+          <div id="pause-veil" hidden>
+            <div class="pause-card">
+              <h3>暂停中</h3>
+              <p>计时停住，口供扣在桌上。</p>
+              <div class="pause-actions">
+                <button id="btn-unpause" class="primary" type="button">继续审</button>
+                <button id="btn-menu-3" class="ghost" type="button">回选档</button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <p id="conflict-line" class="conflict-line" aria-live="polite"></p>
+
+        <div class="controls" role="group" aria-label="操作">
+          <button id="btn-hint" class="primary wide" type="button">提示<span class="mono" id="hint-count">0</span></button>
+          <button id="btn-undo" class="ghost" type="button">撤销</button>
+          <button id="btn-restart" class="ghost" type="button">重开</button>
+          <button id="btn-pause" class="ghost" type="button">暂停</button>
+          <button id="btn-new" class="ghost" type="button">换一局</button>
+          <button id="btn-menu" class="ghost span2" type="button">回选档</button>
+        </div>
+      </div>
+
+      <aside class="panel">
+        <h3>案头</h3>
+        <div class="stats">
+          <div class="stat"><span>步数</span><b id="stat-moves" class="mono">0</b></div>
+          <div class="stat"><span>提示</span><b id="stat-hints" class="mono">0</b></div>
+          <div class="stat"><span>已定身份</span><b id="stat-known" class="mono">0/0</b></div>
+          <div class="stat"><span>骑士</span><b id="stat-knights" class="mono">0</b></div>
+          <div class="stat"><span>冲突证词</span><b id="stat-conflicts" class="mono">0</b></div>
+          <div class="stat"><span>划掉的句子</span><b id="stat-notes" class="mono">0</b></div>
+          <div class="stat"><span>本局实测难度</span><b id="stat-score" class="mono">—</b></div>
+          <div class="stat"><span>种子</span><b id="stat-seed" class="mono">—</b></div>
+        </div>
+
+        <div class="hint-box">
+          <h4 id="hint-rule">提示理由</h4>
+          <p id="hint-line">按 <b>提示</b> 会说出这一手是哪条规则、钉住哪一个人。推不出东西时它不收钱，也只说推不出。</p>
+        </div>
+
+        <h3>牌子怎么认</h3>
+        <div class="legend">
+          <span><i class="sw sw-seal"></i>骑士：实心带缺口的印，这句为真</span>
+          <span><i class="sw sw-hollow"></i>无赖：空心框，这句为假</span>
+          <span><i class="sw sw-unknown"></i>未定：还没有人替他作保</span>
+          <span><i class="sw sw-note"></i>笔记：自己划掉的一句，不算落子</span>
+          <span><i class="sw sw-bad"></i>冲突：已经和某句证词明摆着对不上</span>
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <span>每局唯一解 · 每局可用铅笔规则推出 · 提示点名规则和那个人 — 由 <code>tools/verify.sh</code> 在真实浏览器里逐条断言。</span>
+    <button id="btn-reset" class="link" type="button">清空存档</button>
+  </footer>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

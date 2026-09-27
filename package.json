@@ -1,0 +1,22 @@
+{
+  "name": "syllogism",
+  "version": "1.0.0",
+  "description": "证词 Syllogism — 零猜测骑士推理. 出题时由铅笔求解器实测：每一局都能只用逻辑推到底, 唯一解由独立穷举复核, 难度分与档位区间都是量出来的.",
+  "type": "module",
+  "main": "electron/main.cjs",
+  "scripts": {
+    "start": "node server.cjs",
+    "dev": "node server.cjs 5261",
+    "electron": "electron .",
+    "test": "node tools/engine-test.mjs",
+    "balance": "node tools/balance.mjs",
+    "verify": "bash tools/verify.sh",
+    "check": "for f in js/*.js js/*/*.js; do node --check \"$f\" || exit 1; done && node --check server.cjs && node --check electron/main.cjs && node --check electron/preload.cjs && for f in tools/*.mjs tools/scenarios.js; do node --check \"$f\" || exit 1; done && echo OK"
+  },
+  "keywords": ["game", "puzzle", "knights-and-knaves", "logic", "deduction", "no-guess", "unique-solution", "procedural", "web", "electron"],
+  "author": "z-biz-game",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^33.0.0"
+  }
+}
