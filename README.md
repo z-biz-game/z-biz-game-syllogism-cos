@@ -181,6 +181,11 @@ electron/             桌面壳：`loadFile` 同一个 index.html，`nodeIntegra
 `main` 分支推送 → `.github/workflows/pages.yml` 把 `index.html` + `css` + `js` 复制成静态站点
 （无打包器，也就不用打包器），再发布到 Pages。
 
+Pages 要先在仓库设置里开启并把构建方式设为 `workflow`（`POST /repos/{org}/{repo}/pages`
+带 `{"build_type": "workflow"}`，或 Settings → Pages → Source: GitHub Actions）。
+`actions/deploy-pages` 只部署"Pages 已由 Actions 构建"这个事实，源没开时它直接失败——
+推送本身不会替你打开它。线上地址即仓库的 homepage。
+
 `.github/workflows/ci.yml` **连 `npm install` 都不跑**（没有依赖可装，把桌面壳拉进 CI 只会让一次网络抖动
 变成一次红灯）。它做三件事：逐文件 `node --check`、跑 `tools/engine-test.mjs` 那 150 项断言、确认
 `index.html` 里确实挂着那个 canvas 和 `js/main.js`。引擎的三条承诺（零猜测 / 唯一解 / 提示不是答案）
