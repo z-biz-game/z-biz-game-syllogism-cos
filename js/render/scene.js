@@ -361,12 +361,21 @@ export class SceneView {
   // Pointer position → slot index, or -1 for the padding and for anything off the canvas.
   // A hit in the margin must not touch the ledger, so it answers "nothing" rather than
   // "nearest card".
+  //
+  // 坐标按 rect 与布局宽度的比值换算：canvas.style.width 平时等于 plan.width，比值恒为 1，
+  // 但页面缩放、外层 transform 或把棋盘塞进滚动容器之后就不再是 1。不除这个比值，手机上
+  // 点 A 会打到 B —— 而且只在真机上打偏，桌面测试永远看不出来。
+  toLocal(clientX, clientY) {
+    const box = this.canvas.getBoundingClientRect();
+    const sx = box.width ? this.geo.w / box.width : 1;
+    const sy = box.height ? this.geo.h / box.height : 1;
+    return { x: (clientX - box.left) * sx, y: (clientY - box.top) * sy, box };
+  }
+
   hitTest(clientX, clientY) {
     if (!this.plan) return -1;
-    const box = this.canvas.getBoundingClientRect();
-    const px = clientX - box.left;
-    const py = clientY - box.top;
-    if (px < 0 || py < 0 || px > box.width || py > box.height) return -1;
+    const { x: px, y: py } = this.toLocal(clientX, clientY);
+    if (px < 0 || py < 0 || px > this.geo.w || py > this.geo.h) return -1;
     const slots = this.plan.slots;
     for (let i = 0; i < slots.length; i++) {
       const r = slots[i].rect;

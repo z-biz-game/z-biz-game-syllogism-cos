@@ -11,6 +11,8 @@
 let ctx = null;
 let master = null;
 let enabled = true;
+let voices = 0;          // 实测「静音时不再新建振荡器」用的计数器
+const MASTER_GAIN = 0.5;
 
 function audio() {
   const g = typeof globalThis !== 'undefined' ? globalThis : {};
@@ -20,27 +22,49 @@ function audio() {
     try {
       ctx = new Ctor();
       master = ctx.createGain();
-      master.gain.value = 0.5;
+      master.gain.value = enabled ? MASTER_GAIN : 0;
       master.connect(ctx.destination);
     } catch {
       ctx = null;
       return null;
     }
   }
-  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  // 只有开着音效才把上下文拉回来：否则一次 tone() 调用就把刚 suspend 的上下文又唤醒，
+  // "真静音"当场失效。
+  if (enabled && ctx.state === 'suspended') ctx.resume().catch(() => {});
   return ctx;
+}
+
+// 静音 = 上下文真停 + 音量归零，两件事都做，顺序也讲究：先收音量再 suspend，
+// 免得挂起前那一瞬还有排队中的包络在响。
+function applyMuteState() {
+  if (!ctx || !master) return;
+  try {
+    const t = ctx.currentTime;
+    master.gain.cancelScheduledValues?.(t);
+    master.gain.setTargetAtTime(enabled ? MASTER_GAIN : 0, t, 0.01);
+  } catch {
+    master.gain.value = enabled ? MASTER_GAIN : 0;
+  }
+  if (!enabled && ctx.state === 'running') {
+    Promise.resolve(ctx.suspend()).catch(() => {});
+  } else if (enabled && ctx.state === 'suspended') {
+    Promise.resolve(ctx.resume()).catch(() => {});
+  }
 }
 
 // One oscillator with a two-point pitch glide and an exponential decay. Everything below is a
 // call to this; adding a second voice shape is how a game ends up with sounds that do not
 // belong to the same instrument.
 function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }) {
+  if (!enabled) return;               // 静音态连上下文都不碰，更不新建振荡器节点
   const ac = audio();
-  if (!ac || !enabled) return;
+  if (!ac) return;
   const t = ac.currentTime + delay;
   try {
     const osc = ac.createOscillator();
     const vol = ac.createGain();
+    voices++;
     osc.type = type;
     osc.frequency.setValueAtTime(f0, t);
     osc.frequency.exponentialRampToValueAtTime(Math.max(40, f1), t + dur);
@@ -58,14 +82,16 @@ function tone({ f0, f1 = f0, dur = 0.12, type = 'sine', gain = 0.22, delay = 0 }
 // A short filtered noise burst — the candle of the set, used only for the pencil, which is a
 // mark on paper rather than a verdict on a person.
 function scratch({ dur = 0.07, gain = 0.06 } = {}) {
+  if (!enabled) return;
   const ac = audio();
-  if (!ac || !enabled) return;
+  if (!ac) return;
   try {
     const n = Math.floor(ac.sampleRate * dur);
     const buf = ac.createBuffer(1, n, ac.sampleRate);
     const data = buf.getChannelData(0);
     for (let i = 0; i < n; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / n);
     const src = ac.createBufferSource();
+    voices++;
     const bp = ac.createBiquadFilter();
     const vol = ac.createGain();
     src.buffer = buf;
@@ -82,10 +108,22 @@ function scratch({ dur = 0.07, gain = 0.06 } = {}) {
 
 export const Sound = {
   setEnabled(v) {
-    enabled = !!v;
+    const next = !!v;
+    if (next === enabled) { applyMuteState(); return enabled; }
+    enabled = next;
     if (enabled) audio();
+    applyMuteState();
+    return enabled;
+  },
+  toggleSound() {
+    Sound.setEnabled(!enabled);
+    return enabled;
   },
   enabled: () => enabled,
+  muted: () => !enabled,
+  // 判据要能问出「静音之后到底有没有再长节点」：光看 gain 是 0 还是 0.5 证不了这件事
+  voices: () => voices,
+  contextState: () => (ctx ? ctx.state : 'none'),
   available: () => !!audio(),
 
   // 骑士: the seal coming down — up, warm, one voice.

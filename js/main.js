@@ -58,6 +58,7 @@ const el = {
   winCheck: $('#win-check'),
   winRecord: $('#win-record'),
   pauseVeil: $('#pause-veil'),
+  fs: $('#btn-fullscreen'),
 };
 
 const view = new SceneView(el.canvas);
@@ -313,6 +314,20 @@ el.canvas.addEventListener('pointerdown', pointerDown);
 el.canvas.addEventListener('pointerup', pointerUp);
 el.canvas.addEventListener('pointercancel', pointerCancel);
 el.canvas.addEventListener('contextmenu', (ev) => ev.preventDefault());
+// 回落：没有 PointerEvent 的环境（iOS 12 Safari、部分 WebView）走 touch/mouse 进同一组
+// handler。两条路径共用 pointerDown/pointerUp，所以"手机上点 A 打 B"这类偏差只会有一处根因。
+if (typeof window.PointerEvent !== 'function') {
+  const fromTouch = (ev) => {
+    const t = ev.changedTouches && ev.changedTouches[0];
+    if (!t) return ev;
+    return { clientX: t.clientX, clientY: t.clientY, preventDefault: () => ev.preventDefault() };
+  };
+  el.canvas.addEventListener('touchstart', (ev) => pointerDown(fromTouch(ev)), { passive: false });
+  el.canvas.addEventListener('touchend', (ev) => pointerUp(fromTouch(ev)), { passive: false });
+  el.canvas.addEventListener('touchcancel', pointerCancel);
+  el.canvas.addEventListener('mousedown', (ev) => { if (!ev.button) pointerDown(ev); });
+  el.canvas.addEventListener('mouseup', (ev) => { if (!ev.button) pointerUp(ev); });
+}
 // focus follows the pointer without a press, so the keyboard player sees where they will land
 el.canvas.addEventListener('pointermove', (ev) => {
   if (!game || press || game.status !== 'playing') return;
@@ -533,6 +548,72 @@ function applySettings() {
   $('#btn-motion').textContent = reduce ? '动效 省' : '动效 全';
 }
 
+// 静音是一条开关，不是一句文案：存档、按钮、试听、AudioContext 的 suspend 必须同时翻，
+// 所以按钮和 M 键走同一个函数。
+function toggleMute() {
+  const on = !Store.setting('sound');
+  Store.setSetting('sound', on);
+  applySettings();
+  if (on) Sound.knight();          // 只在"刚打开"时试听一声；关掉时不该有任何声音
+  return on;
+}
+
+// ---- fullscreen ---------------------------------------------------------------------------
+// 绑在顶栏那枚真实存在的 #btn-fullscreen 上。webkit 前缀是 iOS/旧 Safari 的回落；拿不到
+// API 时按钮明说"不支持"，而不是按下去静默失灵。进入/退出各重画一次：availBox() 量的是
+// window.innerHeight，全屏那一瞬间它变了。
+const FS = {
+  node: () => document.documentElement,
+  supported: () => {
+    const n = FS.node();
+    return !!(n && (n.requestFullscreen || n.webkitRequestFullscreen));
+  },
+  active: () => !!(document.fullscreenElement || document.webkitFullscreenElement),
+  enter() {
+    const n = FS.node();
+    const fn = n.requestFullscreen || n.webkitRequestFullscreen;
+    return fn ? fn.call(n) : null;
+  },
+  exit() {
+    const fn = document.exitFullscreen || document.webkitExitFullscreen;
+    return fn ? fn.call(document) : null;
+  },
+};
+
+function syncFsButton() {
+  const b = el.fs;
+  if (!b) return;
+  const active = FS.active();
+  const ok = FS.supported();
+  b.setAttribute('aria-pressed', String(active));
+  b.dataset.unsupported = ok ? '0' : '1';
+  b.textContent = ok ? (active ? '退出全屏' : '全屏') : '全屏 不支持';
+}
+
+function setFullscreen(on) {
+  if (!FS.supported()) return 'unsupported';
+  let out = null;
+  try {
+    out = on ? FS.enter() : FS.exit();
+  } catch {
+    return 'blocked';
+  }
+  // 用户手势之外调用（或被策略拒绝）会 reject；不 catch 就是一条未捕获报错
+  if (out && typeof out.catch === 'function') out.catch(() => syncFsButton());
+  syncFsButton();
+  return on ? 'on' : 'off';
+}
+
+const toggleFullscreen = () => setFullscreen(!FS.active());
+
+for (const ev of ['fullscreenchange', 'fullscreenerror', 'webkitfullscreenchange']) {
+  document.addEventListener(ev, () => {
+    syncFsButton();
+    draw();
+  });
+}
+syncFsButton();
+
 // ---- keyboard: the same writes the chips do, through the same function --------------------
 
 const KEYS = {
@@ -560,11 +641,49 @@ function nextOf(cur) {
   return cur === UNKNOWN ? KNIGHT : cur === KNIGHT ? KNAVE : UNKNOWN;
 }
 
+// 全局键：不依赖棋局存在，选档页上也该有。静音与全屏都是"设备级"开关，把它们关在
+// 棋局里意味着玩家得先开一局才能关掉声音。
+const GLOBAL_KEYS = {
+  m: toggleMute,
+  M: toggleMute,
+  f: toggleFullscreen,
+  F: toggleFullscreen,
+};
+
+// ? = 玩法说明。菜单里那七条规则就是说明本体，滚过去并聚焦，而不是另开一层浮层。
+function revealRules() {
+  show('menu');
+  const list = el.rules;
+  if (!list) return true;
+  list.scrollIntoView?.({ block: 'center' });
+  list.focus?.({ preventScroll: true });
+  return true;
+}
+
 window.addEventListener('keydown', (ev) => {
-  if (!game) return;
   const t = ev.target;
   const tag = t && t.tagName ? t.tagName.toUpperCase() : '';
   if (/INPUT|TEXTAREA|SELECT/.test(tag)) return;
+  if (ev.metaKey || ev.ctrlKey || ev.altKey) return;   // 让位给浏览器/输入法快捷键
+  const gk = GLOBAL_KEYS[ev.key];
+  if (gk) {
+    gk();
+    ev.preventDefault();
+    return;
+  }
+  if (ev.key === '?') {
+    ev.preventDefault();
+    revealRules();
+    return;
+  }
+  if (!game) {
+    // 选档页上 Enter / Space 就是开局
+    if (ev.key === 'Enter' || ev.key === ' ') {
+      ev.preventDefault();
+      begin({ tier: 'trainee' });
+    }
+    return;
+  }
   // a focused button already owns Space/Enter; the canvas owns every other key
   if (tag === 'BUTTON' && (ev.key === ' ' || ev.key === 'Enter')) return;
   // Tab is only stolen while the canvas itself holds focus, so the buttons stay reachable
@@ -604,15 +723,12 @@ $('#btn-daily').addEventListener('click', () => {
   const t = TIERS[Math.abs(hashShort(key)) % TIERS.length];
   begin({ tier: t.id, seed: `daily|${key}` });
 });
-$('#btn-sound').addEventListener('click', () => {
-  Store.setSetting('sound', !Store.setting('sound'));
-  applySettings();
-  Sound.knight();
-});
+$('#btn-sound').addEventListener('click', toggleMute);
 $('#btn-motion').addEventListener('click', () => {
   Store.setSetting('reduceMotion', !Store.setting('reduceMotion'));
   applySettings();
 });
+$('#btn-fullscreen').addEventListener('click', toggleFullscreen);
 $('#btn-reset').addEventListener('click', () => {
   Store.reset();
   applySettings();
@@ -671,6 +787,16 @@ window.syllogism = {
   pause: () => setPaused(true),
   unpause: () => setPaused(false),
   togglePause,
+  // 静音与全屏的可复验入口：判据要能问"按下去 AudioContext 到底停没停"
+  toggleMute,
+  muted: () => Sound.muted(),
+  audioState: () => Sound.contextState(),
+  voices: () => Sound.voices(),
+  toggleFullscreen,
+  setFullscreen,
+  fullscreenSupported: () => FS.supported(),
+  isFullscreen: () => FS.active(),
+  revealRules,
   pressSlot(i) {
     const slot = view.slotAt(i);
     return slot ? commitSlot(slot, slot.kind === 'note' ? 'note' : 'tap') : null;

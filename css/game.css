@@ -23,11 +23,20 @@ body { touch-action: manipulation; }
 #app {
   max-width: 1180px;
   margin: 0 auto;
-  padding: var(--space-page) var(--space-page) var(--space-inner);
+  /* safe-area：刘海压顶、Home 指示条压底，落点正是顶栏与底部那排按钮。viewport-fit=cover
+     已经写在 index.html 的 viewport 里——不 cover，iOS 上 env() 恒为 0，这几行等于白写。 */
+  padding:
+    calc(var(--space-page) + env(safe-area-inset-top))
+    calc(var(--space-page) + env(safe-area-inset-right))
+    calc(var(--space-inner) + env(safe-area-inset-bottom))
+    calc(var(--space-page) + env(safe-area-inset-left));
   display: flex;
   flex-direction: column;
   gap: var(--space-card);
   min-height: 100vh;
+  /* dvh 才是"看得见那么高"：iOS Safari 地址栏一收放，100vh 就大于可视区，
+     底部的「回选档」永远要滚一下才点得到。不认 dvh 的浏览器停在上一行。 */
+  min-height: 100dvh;
 }
 
 .mono { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
@@ -112,6 +121,18 @@ main { flex: 1; }
 
 .reduce-motion .view,
 .reduce-motion button { animation: none; transition: none; }
+
+/* 系统 pref 那一支：以前只有应用内的「动效 省」开关落到 CSS 上，OS 里设了"减少动态效果"
+   的玩家在这个页面上仍然什么都动。用 0.001ms 而不是 animation: none —— 依赖 animationend
+   收尾的逻辑（浮层淡出后清状态）在 none 之下永远不会触发。 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ---------- menu ---------- */
 
