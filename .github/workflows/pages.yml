@@ -20,14 +20,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # No bundler: the game ships plain ES modules, so the site is a file copy.
-      # Only these three paths are reachable from index.html — keeping the server,
+      # Only the paths index.html actually reaches are copied — keeping the server,
       # the electron shell, the harness and the docs out of the artifact also keeps
       # node_modules out, which `path: .` would happily upload.
+      # icons / manifest / sw / 纹理同样是 index.html 直接引用的，漏一条线上就是 404：
+      # manifest 取不到 ⇒ 安装提示永不出现，sw 取不到 ⇒ 离线壳形同不存在。
       - name: Assemble static site
         run: |
           mkdir _site
-          cp index.html _site/
-          cp -r css js _site/
+          cp index.html manifest.webmanifest sw.js _site/
+          cp -r css js icons _site/
+          mkdir -p _site/assets
+          cp -r assets/img _site/assets/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
