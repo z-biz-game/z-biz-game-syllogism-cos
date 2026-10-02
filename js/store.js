@@ -4,7 +4,7 @@
 // travel through storage at all: 7 people is 7 trits, and a save stays a few hundred bytes.
 
 import { KNIGHT, KNAVE, UNKNOWN } from './engine/logic.js';
-import { tierById } from './engine/generate.js';
+import { TIERS, tierById } from './engine/generate.js';
 
 export const KEY = 'syllogism.save.v1';
 
@@ -54,18 +54,84 @@ function load() {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) return defaults();
-    const parsed = JSON.parse(raw);
-    const base = defaults();
-    return {
-      ...base,
-      ...parsed,
-      settings: { ...base.settings, ...(parsed.settings || {}) },
-      totals: { ...base.totals, ...(parsed.totals || {}) },
-      best: parsed.best || {},
-    };
+    return sanitise(JSON.parse(raw));
   } catch {
     return defaults();
   }
+}
+
+// 两段式解码。第一段只看"形状"：一段存档是一组互相独立的记录，某一条认不出来就丢它自己，
+// 不能让它把整局带走——旧代码在这里是 `{...base, ...parsed}`，parsed 是个字符串也会展开成功，
+// 而 resume 里缺 ink 时 rleDecode 直接 null.length 抛出去，菜单渲染当场死掉。
+// 第二段（Store.resume()）才把已通过形状的记录解成棋盘，并且自己再幂等地校验一遍。
+const finite = (v) => typeof v === 'number' && Number.isFinite(v);
+const count = (v) => (finite(v) && v >= 0 ? Math.floor(v) : null);
+
+function saneSettings(v) {
+  const base = defaults().settings;
+  if (!v || typeof v !== 'object') return base;
+  const bool = (k) => (typeof v[k] === 'boolean' ? v[k] : base[k]);
+  return { sound: bool('sound'), reduceMotion: bool('reduceMotion') };
+}
+
+function saneTotals(v) {
+  const t = defaults().totals;
+  if (!v || typeof v !== 'object') return t;
+  for (const k of Object.keys(t)) {
+    const c = count(v[k]);
+    if (c !== null) t[k] = c;
+  }
+  return t;
+}
+
+// 成绩条的四个数缺一不可：宁可显示"还没有记录"，也不拿一条半截记录去排最佳。
+function saneBest(v) {
+  const out = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const tier of TIERS) {
+    const r = v[tier.id];
+    if (!r || typeof r !== 'object') continue;
+    const ms = count(r.ms);
+    const hints = count(r.hints);
+    const moves = count(r.moves);
+    const n = count(r.n);
+    if (ms === null || hints === null || moves === null || n === null) continue;
+    out[tier.id] = { ms, hints, moves, n, at: count(r.at) ?? 0 };
+  }
+  return out;
+}
+
+function saneResume(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const tier = TIERS.find((t) => t.id === v.tier);
+  if (!tier) return null;
+  const seed = v.originSeed !== undefined ? v.originSeed : v.seed;
+  if (typeof seed !== 'string' && !finite(seed)) return null;
+  if (!Array.isArray(v.ink)) return null;
+  const ink = [];
+  for (const p of v.ink) {
+    if (!Number.isInteger(p) || p < 0 || p > 255) return null;
+    ink.push(p);
+  }
+  return {
+    originSeed: seed,
+    tier: tier.id,
+    elapsedMs: count(v.elapsedMs) ?? 0,
+    moves: count(v.moves) ?? 0,
+    hints: count(v.hints) ?? 0,
+    at: count(v.at) ?? 0,
+    ink,
+  };
+}
+
+function sanitise(parsed) {
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return defaults();
+  return {
+    settings: saneSettings(parsed.settings),
+    totals: saneTotals(parsed.totals),
+    best: saneBest(parsed.best),
+    resume: saneResume(parsed.resume),
+  };
 }
 
 export const Store = {
@@ -140,12 +206,19 @@ export const Store = {
   },
 
   resume() {
-    const r = this.data.resume;
+    // 第二段：即便有人绕过 load() 直接改了 data.resume，这里也先按形状再过一遍再解棋盘。
+    const r = saneResume(this.data.resume);
     if (!r) return null;
     // n is not stored: it belongs to the tier, and the tier is what the board is regenerated
     // from, so decoding against it cannot disagree with the rebuilt room.
     const n = tierById(r.tier).n;
     return { ...r, n, known: rleDecode(r.ink, n) };
+  },
+
+  // 换一段存档重新解码（测试与"另一个标签页写过存档"用得上），不走整页刷新。
+  reload() {
+    this.data = load();
+    return this.data;
   },
 
   clearResume() {
