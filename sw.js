@@ -26,6 +26,7 @@ const PRECACHE = [
   './js/engine/count.js',
   './js/engine/rng.js',
   './js/render/scene.js',
+  './js/render/ambient.js',
   './js/render/textures.js',
   './js/ui/game.js',
   './manifest.webmanifest',

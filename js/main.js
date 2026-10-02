@@ -8,7 +8,7 @@
 // before the press. Lifting the finger somewhere else cancels the preview and the ledger stays
 // untouched, which is why a drag across three chips cannot cost three moves.
 
-import { applyThemeVars, setReduceMotion, systemPrefersReducedMotion, Board, Space } from './theme.js';
+import { applyThemeVars, setReduceMotion, systemPrefersReducedMotion, prefersReducedMotion, Board, Space } from './theme.js';
 import { Sound } from './audio/synth.js';
 import { Store } from './store.js';
 import { TIERS, tierById, makePuzzle } from './engine/generate.js';
@@ -16,6 +16,8 @@ import * as Engine from './engine/logic.js';
 import { countModels, matchesTruth, UNIQUE } from './engine/count.js';
 import { dateSeed } from './engine/rng.js';
 import { SceneView } from './render/scene.js';
+import { Ambient, drawAmbient } from './render/ambient.js';
+import { loadTextures, whenTexturesReady } from './render/textures.js';
 import { Game, RuleGloss, AS_LABEL, KNIGHT, KNAVE, UNKNOWN } from './ui/game.js';
 
 const VERSION = '1.0.0';
@@ -59,9 +61,11 @@ const el = {
   winRecord: $('#win-record'),
   pauseVeil: $('#pause-veil'),
   fs: $('#btn-fullscreen'),
+  ambient: $('#ambient'),
 };
 
 const view = new SceneView(el.canvas);
+const ambient = new Ambient('syllogism');
 let game = null;
 let pulse = null;
 let startedAt = 0;
@@ -103,6 +107,66 @@ function draw() {
   const { w, h } = availBox();
   view.resize(game, w, h);
   view.draw(game, { pulse });
+  drawAmbientLayer();
+}
+
+// ---- 环境层：全盘唯一每帧在动的东西 ------------------------------------------------
+// 它单独一张画布，所以棋盘"同一状态两帧逐字节相同"那条像素判据不受影响；而帧率无关
+// 这件事也只有在这一层可测——其余全是输入驱动的即时重画，没有"帧"这个概念。
+function drawAmbientLayer() {
+  const c = el.ambient;
+  if (!c || !c.getContext || el.viewGame.hidden) return;
+  const box = el.canvas.getBoundingClientRect();
+  const dpr = Math.max(1, Math.round(window.devicePixelRatio || 1));
+  const w = Math.max(1, Math.round(box.width));
+  const h = Math.max(1, Math.round(box.height));
+  if (c.width !== w * dpr || c.height !== h * dpr) {
+    c.width = w * dpr;
+    c.height = h * dpr;
+  }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  drawAmbient(ctx, w, h, ambient, { enabled: !prefersReducedMotion() });
+}
+
+// 暂停 / 回菜单 / 已结案 / 系统要求减少动效 / 页面在后台：仿真一律不推进。
+// 注意这里返回 false 时 tick 仍然更新 lastTs——否则切个标签页回来那一帧的
+// elapsed 是几分钟，仿真会一次性跳几十秒。
+function ambientRuns() {
+  if (prefersReducedMotion()) return false;
+  if (!game || el.viewGame.hidden) return false;
+  if (game.status !== 'playing') return false;
+  if (typeof document !== 'undefined' && document.hidden) return false;
+  return true;
+}
+
+let rafId = 0;
+let lastTs = -1;
+
+function tick(ts) {
+  rafId = requestAnimationFrame(tick);
+  if (typeof ts !== 'number') return;
+  // 哨兵是 -1 不是 0：0 是合法的 performance.now() 值，撞上就白丢一帧
+  if (lastTs < 0) {
+    lastTs = ts;
+    return;
+  }
+  const elapsed = (ts - lastTs) / 1000;
+  lastTs = ts;
+  if (!ambientRuns()) return;
+  ambient.step(Math.min(0.05, Math.max(0, elapsed)));
+  drawAmbientLayer();
+}
+
+function startAmbient() {
+  if (rafId || typeof requestAnimationFrame !== 'function') return;
+  lastTs = -1;
+  rafId = requestAnimationFrame(tick);
+}
+
+function stopAmbient() {
+  if (rafId && typeof cancelAnimationFrame === 'function') cancelAnimationFrame(rafId);
+  rafId = 0;
 }
 
 // One place writes the readouts, so no panel number can go stale or disagree with the canvas.
@@ -378,7 +442,10 @@ function restart() {
   if (!game) return null;
   game.restart();
   pulse = null;
+  press = null;
   baseElapsed = 0;
+  ambient.reset(game.puzzle.originSeed);   // 粒子与时钟跟着这一局一起回到起点
+  lastTs = -1;
   startClock();          // a restarted run is a different run: the clock starts over with it
   el.winVeil.hidden = true;
   el.pauseVeil.hidden = true;
@@ -419,6 +486,8 @@ function begin({ tier = 'trainee', seed = null, resume = null } = {}) {
   game = new Game(bundle);
   pulse = null;
   press = null;
+  ambient.reset(bundle.originSeed || origin);
+  lastTs = -1;
   el.winVeil.hidden = true;
   el.pauseVeil.hidden = true;
   baseElapsed = 0;
@@ -542,6 +611,10 @@ function applySettings() {
   const reduce = !!Store.setting('reduceMotion') || systemPrefersReducedMotion();
   setReduceMotion(!!Store.setting('reduceMotion'));
   document.body.classList.toggle('reduce-motion', reduce);
+  // 减动效不是"把动画调慢一点"：仿真整条停掉，画面退成一张静图。
+  if (reduce) stopAmbient();
+  else startAmbient();
+  drawAmbientLayer();
   $('#btn-sound').setAttribute('aria-pressed', String(!!Store.setting('sound')));
   $('#btn-sound').textContent = Store.setting('sound') ? '音效 开' : '音效 关';
   $('#btn-motion').setAttribute('aria-pressed', String(!!Store.setting('reduceMotion')));
@@ -739,13 +812,23 @@ $('#btn-reset').addEventListener('click', () => {
 
 window.addEventListener('resize', draw);
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') flushResume();
+  if (document.visibilityState === 'hidden') {
+    flushResume();
+    stopAmbient();
+    lastTs = -1;          // 回前台那一帧的 elapsed 是"离开多久"，不是"多久没画"
+  } else {
+    startAmbient();
+  }
 });
 window.addEventListener('pagehide', flushResume);
 
 applyThemeVars();
 applySettings();
 renderMenu();
+loadTextures();
+// 纹理晚到只该有一个后果：第一帧少一层纸纹，到齐后补画。装不上就永远走程序化画法。
+whenTexturesReady(() => draw());
+startAmbient();
 
 window.syllogism = {
   version: VERSION,
@@ -797,6 +880,13 @@ window.syllogism = {
   fullscreenSupported: () => FS.supported(),
   isFullscreen: () => FS.active(),
   revealRules,
+  // 环境层的可复验读数。帧率对拍问的是"同一段虚拟时长、三档帧率，末态是不是同一个数"，
+  // 所以既要把末态挂出来，也要能绕开真实 rAF 直接喂合成时间戳。
+  ambient: () => ambient.snapshot(),
+  ambientRuns,
+  tick,
+  startAmbient,
+  stopAmbient,
   pressSlot(i) {
     const slot = view.slotAt(i);
     return slot ? commitSlot(slot, slot.kind === 'note' ? 'note' : 'tap') : null;

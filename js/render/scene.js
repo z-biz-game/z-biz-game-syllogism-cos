@@ -17,6 +17,7 @@
 
 import { Palette, Board, Radius, Type } from '../theme.js';
 import { KNIGHT, KNAVE, UNKNOWN } from '../engine/logic.js';
+import { patternOf } from './textures.js';
 
 // The compression ladder. Every rung stays inside the ranges js/theme.js declares and never
 // drops a glyph below Board.minFont — under that the sheet stops being a board and becomes a
@@ -420,6 +421,20 @@ export class SceneView {
     ctx.fillStyle = bg;
     path(ctx, 0, 0, width, height, Radius.card);
     ctx.fill();
+    // 纸纹：assets/img/paper-grain.png，make_art.py 现画的 256px 无缝颗粒。它是静态叠加，
+    // 一帧一帧画出来的结果逐字节相同——"同一状态两帧一致"是这套像素判据的地基，动不得。
+    // 图没到（首帧、离线、file:// 下没拷 assets）就整段跳过，画面退回纯程序化画法。
+    const grain = patternOf(ctx, 'grain');
+    if (grain) {
+      ctx.save();
+      path(ctx, 0, 0, width, height, Radius.card);
+      ctx.clip();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = grain;
+      ctx.fillRect(0, 0, width, height);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
     const glow = ctx.createRadialGradient(width / 2, -height * 0.1, 24, width / 2, -height * 0.1, height * 0.92);
     glow.addColorStop(0, Palette.sealGlow);
     glow.addColorStop(1, 'rgba(0,0,0,0)');

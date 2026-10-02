@@ -300,8 +300,22 @@ main { flex: 1; }
 
 #board-wrap { position: relative; align-self: center; max-width: 100%; }
 
+/* 环境层垫在棋盘底下：它每帧都变，而棋盘的判据是"同一状态两帧逐字节相同"，两张图
+   分开画才互不破坏。pointer-events 必须关掉——不然浮尘吃掉一次点击，玩家点的是牌。 */
+.ambient {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: var(--radius-card);
+}
+
 #board {
   display: block;
+  position: relative;
+  z-index: 1;
   border-radius: var(--radius-card);
   touch-action: none;
   cursor: default;
