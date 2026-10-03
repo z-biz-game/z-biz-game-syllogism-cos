@@ -9,6 +9,11 @@
 <!-- Inline icon: without it the browser probes the Pages domain root for /favicon.ico and logs a 404. -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230A0611'/%3E%3Cpath d='M6 6h14l6 10-6 10H6z' fill='%23F0B13C'/%3E%3C/svg%3E" />
 <link rel="stylesheet" href="css/game.css" />
+
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
 </head>
 <body>
 <div id="app">
@@ -166,5 +171,6 @@
 </div>
 
 <script type="module" src="js/main.js"></script>
+  <script src="js/sw-register.js"></script>
 </body>
 </html>
