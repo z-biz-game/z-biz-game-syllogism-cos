@@ -11,6 +11,12 @@
 let ctx = null;
 let master = null;
 let enabled = true;
+// 静音偏好：读回存档。放在模块顶层，这样每次 init（首屏、开局、重开）都拿到同一个答案，
+// 重开一局不会把玩家的静音选择洗掉。
+try {
+  if (localStorage.getItem('cos.mute') === '1') enabled = false;
+} catch { /* 读不到就沿用默认开声 */ }
+
 
 function audio() {
   const g = typeof globalThis !== 'undefined' ? globalThis : {};
@@ -82,8 +88,23 @@ function scratch({ dur = 0.07, gain = 0.06 } = {}) {
 
 export const Sound = {
   setEnabled(v) {
-    enabled = !!v;
-    if (enabled) audio();
+    const on = !!v;
+    if (on === enabled) return;
+    enabled = on;
+    // 真静音：停掉 AudioContext 本身（时钟停、图不跑），不是把音量拧到 0。
+    if (ctx) {
+      if (on) {
+        if (ctx.state === 'suspended' && ctx.resume) ctx.resume().catch(() => {});
+      } else if (ctx.state === 'running' && ctx.suspend) {
+        ctx.suspend().catch(() => {});
+      }
+    } else if (on) {
+      audio();                       // 还没建过 ctx：开声时顺手建起来
+    }
+    // 偏好落盘：刷新页面后 init 要能读回静音态，不能自己弹回来。
+    try {
+      localStorage.setItem('cos.mute', on ? '1' : '0');
+    } catch { /* 隐私模式下写不进去也不该炸游戏 */ }
   },
   enabled: () => enabled,
   available: () => !!audio(),
