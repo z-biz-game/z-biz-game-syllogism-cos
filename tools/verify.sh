@@ -19,7 +19,7 @@
 # its own.
 set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-PORT=${CDP_PORT:-9351}
+PORT=${CDP_PORT:-9351}; if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo ":$PORT is already LISTENING — a sibling gate or an orphan Chrome holds it; attaching there reads someone else's browser. Wait for it to finish, or rerun with CDP_PORT=<a free port>." >&2; lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >&2 || true; exit 6; fi  # 一机一台：撞在同一个默认口上时不报错的是 Chrome，报错的是绿——先让路再开闸
 # This harness owns its port. Sibling repos in the same farm run their own verify.sh at the
 # same time on their own port, and a long-lived dev server will happily serve a *different*
 # app — hence the pre-flight identity check below.
