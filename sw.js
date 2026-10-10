@@ -1,87 +1,56 @@
 'use strict';
-// 离线壳：network-first，回落到缓存。
+// 离线可用 + 永不被旧缓存钉住。
 //
-// 为什么不是 cache-first：本仓是裸 ES module，没有打包、没有内容哈希文件名。cache-first 加上
-// 手工 VERSION 号，等于把 js/css 永久钉死在第一次缓存的那一版——出新 HTML 配旧 main.js 的鬼状态
-// 就是这么来的（玩家卡在标题屏，而源码看起来完全正常）。network-first 的代价只有断网时的第一次
-// 打开，而断网时正好有缓存兜底。
-//
-// VERSION 只用于「换一整套缓存」：格式变了（下面 SHELL 的语义、或匹配规则改了）就 +1，activate
-// 里旧缓存整批删掉。它不是内容版本号，也不该被当成版本号手工去对。
-const VERSION = 'v2';
-const SHELL = `syllogism-${VERSION}-shell`;
-const RUNTIME = `syllogism-${VERSION}-runtime`;
+// 两条实测换来的口径：
+//   1) 一律 **网络优先**，命中网络才回填缓存。手工 VERSION + cache-first 的组合，
+//      发出去的 HTML 会配上上一版的 js/css，出一个"新界面配旧逻辑"的鬼状态，
+//      而且玩家自己无法恢复（只能等缓存过期）。
+//   2) 缓存名带版本号（activate 时清掉非本版的名字）。改版**不需要**同步 bump：
+//      同名文件重绘之后，网络优先这一条保证客户端下一次联网就拿到新字节。
+const VERSION = 'syllogism-cos-v1';
+const CACHE = `${VERSION}-shell`;
+const PRECACHE = ['index.html', 'manifest.webmanifest'];
 
-const PRECACHE = [
-  './',
-  './index.html',
-  './css/game.css',
-  './js/main.js',
-  './js/theme.js',
-  './js/store.js',
-  './js/pwa.js',
-  './js/audio/synth.js',
-  './js/engine/logic.js',
-  './js/engine/generate.js',
-  './js/engine/count.js',
-  './js/engine/rng.js',
-  './js/render/scene.js',
-  './js/render/ambient.js',
-  './js/render/textures.js',
-  './js/ui/game.js',
-  './manifest.webmanifest',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './assets/img/paper-grain.png',
-  './assets/img/candle-glow.png',
-  './assets/img/mote.png',
-];
-
-self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(SHELL)
-      .then((c) => Promise.all(PRECACHE.map((u) => c.add(u).catch(() => null))))
-      .then(() => self.skipWaiting()),
+self.addEventListener('install', (ev) => {
+  // 首屏两件套先抓下来：断网时至少能打开界面，而不是浏览器的错误页。
+  ev.waitUntil(
+    caches.open(CACHE).then((c) => c.addAll(PRECACHE).catch(() => {})).then(() => self.skipWaiting())
   );
 });
 
-self.addEventListener('activate', (e) => {
-  const keep = new Set([SHELL, RUNTIME]);
-  e.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => !keep.has(k)).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
+self.addEventListener('activate', (ev) => {
+  ev.waitUntil(
+    caches
+      .keys()
+      .then((keys) => Promise.all(keys.filter((k) => !k.startsWith(VERSION)).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
   );
 });
 
-// 只有同源 GET 才管。跨源（字体、CDN）直接放行——把它们塞进本地缓存是把别人的
-// 缓存策略抄到自己账上，而且 opaque response 根本读不回来。
-self.addEventListener('fetch', (e) => {
-  const req = e.request;
+self.addEventListener('fetch', (ev) => {
+  const req = ev.request;
   if (req.method !== 'GET') return;
-  let url;
-  try {
-    url = new URL(req.url);
-  } catch {
-    return;
-  }
+  const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
-  // 带查询串的（开发服务器热更、玩家自己加的 ?v=）不碰，缓存它等于伪造一份新资源
-  if (url.search) return;
 
-  e.respondWith(
+  ev.respondWith(
     fetch(req)
       .then((res) => {
         if (res && res.ok) {
           const copy = res.clone();
-          caches.open(RUNTIME).then((c) => c.put(req, copy));
+          caches.open(CACHE).then((c) => c.put(req, copy));
         }
         return res;
       })
-      .catch(() => caches.match(req, { ignoreSearch: false }).then(
-        (hit) => hit
-          || (req.mode === 'navigate' ? caches.match('./index.html') : null)
-          || Response.error(),
-      )),
+      .catch(async () => {
+        const hit = await caches.match(req);
+        if (hit) return hit;
+        // 导航请求（地址栏/刷新/桌面图标）离线时回落到缓存的那份壳，不白屏。
+        if (req.mode === 'navigate') {
+          const shell = await caches.match('index.html');
+          if (shell) return shell;
+        }
+        return Response.error();
+      })
   );
 });

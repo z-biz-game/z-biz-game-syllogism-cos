@@ -19,7 +19,7 @@
 # its own.
 set -u
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-PORT=${CDP_PORT:-9351}
+PORT=${CDP_PORT:-9351}; if command -v lsof >/dev/null 2>&1 && lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then echo ":$PORT is already LISTENING — a sibling gate or an orphan Chrome holds it; attaching there reads someone else's browser. Wait for it to finish, or rerun with CDP_PORT=<a free port>." >&2; lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >&2 || true; exit 6; fi  # 一机一台：撞在同一个默认口上时不报错的是 Chrome，报错的是绿——先让路再开闸
 # This harness owns its port. Sibling repos in the same farm run their own verify.sh at the
 # same time on their own port, and a long-lived dev server will happily serve a *different*
 # app — hence the pre-flight identity check below.
@@ -117,6 +117,12 @@ echo "boot: syllogism $BOOT at $BASE"
 
 FAILED=0
 : >"$LOG-tally.txt"
+# 部署集闸：ci.yml 跑这两步、本地整闸以前一次都不跑（59 仓同形）。「本地全绿、线上 404 自己的
+# manifest / sw.js / 图标」这一类坏法缺的就是这一步。它不碰 DOM，放在场景腿之前、FAILED 归零之后
+# ——插在归零之前就会被那一句抹掉，那是假绿的一条现成通道。
+echo "=== deploy-set ==="
+node tools/deploy-set.mjs || FAILED=1
+node tools/deploy-set-selftest.mjs || FAILED=1
 for s in ${SCENARIOS:-engine gen play hint save resume layout input real fit}; do
   echo "=== $s ==="
   case "$s" in

@@ -446,3 +446,38 @@ main { flex: 1; }
   .foot { flex-direction: column; align-items: flex-start; }
   .brand h1 { letter-spacing: 0.18em; }
 }
+
+/* 中央分发：safe-area 兜底 */
+
+/* ---------- safe-area：刘海与主屏条不吃掉按钮（中央分发，akari-cos 同口径） ---------- */
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+}
+html, body {
+  padding-left: var(--sal);
+  padding-right: var(--sar);
+}
+body {
+  padding-top: var(--sat);
+  padding-bottom: var(--sab);
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+/* 贴边的固定/吸底元素自己让开主屏条，别让 home indicator 压住按钮 */
+.fixed-bottom, .bottom-bar, .hud-bottom, footer.app-footer {
+  padding-bottom: calc(var(--sab) + env(safe-area-inset-bottom, 0px));
+}
+
+/* 手机档：button.link 写的是 min-height:0，实测高度只剩字身那一层——390×844 量到
+   btn-reset 64x24。它是「清空存档」这种不可撤销操作的入口，长得像链接不改变这一点。
+   只把命中盒撑回 44px 下限，字面（下划线、12px、灰色）照旧。 */
+@media (max-width: 420px) {
+  button.link {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+  }
+}
